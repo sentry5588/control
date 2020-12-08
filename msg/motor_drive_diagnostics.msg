@@ -1,0 +1,5 @@
+float32 pitch_ang_filtered
+float32 pitch_ang_rate
+float32 pitch_ang_meas
+float32 x_accel
+float32 z_accel
