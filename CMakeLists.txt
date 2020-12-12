@@ -208,6 +208,6 @@ include_directories(
 # catkin_add_nosetests(test)
 
 add_executable(motor_drive src/motor_drive.cpp)
-target_link_libraries(motor_drive ${catkin_LIBRARIES})
+target_link_libraries(motor_drive ${catkin_LIBRARIES} -lwiringPi)
 add_dependencies(motor_drive motor_drive_motor_drive_cpp)
 
