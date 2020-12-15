@@ -1,0 +1,6 @@
+
+<launch>
+
+  <node pkg="control" type="motor_drive" name="motor_drive" clear_params="true" output="screen"/>
+
+</launch>
