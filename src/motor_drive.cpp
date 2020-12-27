@@ -1,67 +1,72 @@
 #include "ros/ros.h"
 #include "std_msgs/String.h"
 #include <sensor_msgs/Imu.h>
+#include <std_msgs/Int32.h>
+#include <std_msgs/Float32.h>
 #include <cmath>
 #include "motor_drive/motor_drive_diagnostics.h"
-#include <wiringPi.h>
+#include <algorithm>
 
-double pitch_angle_comp_filtered = 0.0;
-motor_drive::motor_drive_diagnostics m_diag_msg;
-int PWM_RANGE = 4095, PWM_DUTY_CYCLE = 2047;
+double PITCH_ANGLE_CTRL_KP = 0.0;
+double PITCH_ANGLE_CTRL_KI = 0.0;
+double PITCH_ANGLE_CTRL_KD = 0.0;
+double PITCH_ANGLE_ERR_INTEGRAL_LIMIT = 0.0;
+double PITCH_ANGLE_PID_SATURATION_LIMIT = 0.0;
 
-void sub_read_imu(const sensor_msgs::Imu& msg)
-{
-  double p_accel = 0.0, dp_gyro = 0.0, dT = 0.02;
-  double alpha = 0.98; // To tune
-//  ROS_INFO_STREAM("I heard: " << msg.header.frame_id);
-//  ROS_INFO_STREAM("x acc: " << msg.linear_acceleration.x);
-  p_accel = atan2(msg.linear_acceleration.z, msg.linear_acceleration.x) - 0.205; // radian
-  dp_gyro = msg.angular_velocity.y;
-  pitch_angle_comp_filtered = (1-alpha) * p_accel + alpha * (pitch_angle_comp_filtered + dp_gyro * dT);
-  ROS_INFO_STREAM("Filtered pitch angle is: " << pitch_angle_comp_filtered);
+double pitch_angle = 0.0;
 
-  m_diag_msg.pitch_ang_meas = p_accel;
-  m_diag_msg.pitch_ang_rate = dp_gyro;
-  m_diag_msg.x_accel = msg.linear_acceleration.x;
-  m_diag_msg.z_accel = msg.linear_acceleration.z;
-  m_diag_msg.pitch_ang_filtered = pitch_angle_comp_filtered;
+void obtain_control_calibrations(const ros::NodeHandle &n) {
+  n.getParam("/pitch_angle_ctrl_kp", PITCH_ANGLE_CTRL_KP);
+  n.getParam("/pitch_angle_ctrl_ki", PITCH_ANGLE_CTRL_KI);
+  n.getParam("/pitch_angle_ctrl_kd", PITCH_ANGLE_CTRL_KD);
+  n.getParam("/pitch_angle_err_integral_limit", PITCH_ANGLE_ERR_INTEGRAL_LIMIT);
+  n.getParam("/pitch_angle_pid_saturation_limit", PITCH_ANGLE_PID_SATURATION_LIMIT);
 }
 
-void set_left_wheel_speed(double v) {
-  int PWM_PIN = 18, DIRECTION_PIN = 24;
-  int clock_divider = 1000;
-//  pinMode(PWM_PIN, PWM_OUTPUT);
-//  pinMode(DIRECTION_PIN, OUTPUT);
-
-  if (v >= 0.0) {
-//    digitalWrite(DIRECTION_PIN, HIGH);
-  } else {
-//    digitalWrite(DIRECTION_PIN, LOW);
-  }
-//  pwmSetMode(PWM_MODE_MS);
-//  pwmSetRange (PWM_RANGE);
-//  pwmWrite(PWM_PIN, PWM_DUTY_CYCLE);
-  pwmSetClock(clock_divider);
+void read_pitch_cb(const std_msgs::Float32& msg)
+{
+  pitch_angle = (double) msg.data;
 }
 
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "motor_drive");
   ros::NodeHandle n;
-  ros::Subscriber sub = n.subscribe("imu", 1000, sub_read_imu);
-  ros::Publisher pub = n.advertise<motor_drive::motor_drive_diagnostics>("compl_filter_diag", 10);
+  ros::Subscriber imu_sub = n.subscribe("pitch_angle", 1000, read_pitch_cb);
+//  ros::Publisher left_motor_pub = n.advertise<motor_drive::motor_drive_diagnostics>("compl_filter_diag", 10);
+  ros::Publisher left_motor_pub = n.advertise<std_msgs::Int32>("left_motor_hz", 10);
+  ros::Publisher right_motor_pub = n.advertise<std_msgs::Int32>("right_motor_hz", 10);
   ros::Rate rate(50); // Hz
 
-  if (wiringPiSetupGpio() == -1) {
-    exit(1);
-  }
+  obtain_control_calibrations(n);
 
+  double pitch_angle_err_integral = 0.0, pitch_angle_err = 0.0;
+  double pitch_angle_P_ctrl = 0.0, pitch_angle_I_ctrl = 0.0, pitch_angle_PID_ctrl = 0.0;
   while(ros::ok()) {
-    set_left_wheel_speed(m_diag_msg.pitch_ang_filtered);
-    pub.publish(m_diag_msg);
+    std_msgs::Int32 left_pwm_msg, right_pwm_msg;
 
+    // Pitch Angle PID loop
+    pitch_angle_err = pitch_angle;
+    pitch_angle_P_ctrl = pitch_angle_err * PITCH_ANGLE_CTRL_KP;
+    pitch_angle_err_integral += pitch_angle_err * 0.02;
+    // anti-windup I: integral limit
+    pitch_angle_err_integral = std::max(pitch_angle_err_integral, -PITCH_ANGLE_ERR_INTEGRAL_LIMIT);
+    pitch_angle_err_integral = std::min(pitch_angle_err_integral, PITCH_ANGLE_ERR_INTEGRAL_LIMIT);
+    pitch_angle_I_ctrl = pitch_angle_err_integral * PITCH_ANGLE_CTRL_KI;
+    pitch_angle_PID_ctrl = pitch_angle_P_ctrl + pitch_angle_I_ctrl;
+    // PID control output limit
+    pitch_angle_PID_ctrl = std::max(pitch_angle_PID_ctrl, -PITCH_ANGLE_PID_SATURATION_LIMIT);
+    pitch_angle_PID_ctrl = std::min(pitch_angle_PID_ctrl, PITCH_ANGLE_PID_SATURATION_LIMIT);
+    if (pitch_angle_err > 0.5 || pitch_angle_err < -0.5) { // if loss control, then disable PID outputs
+      pitch_angle_PID_ctrl = 0.0;
+    }
 
-    ROS_INFO_STREAM("motor_drive main function");
+    left_pwm_msg.data = (int32_t) (pitch_angle_PID_ctrl);
+    right_pwm_msg.data = (int32_t) (pitch_angle_PID_ctrl);
+    left_motor_pub.publish(left_pwm_msg);
+    right_motor_pub.publish(right_pwm_msg);
+
+//    ROS_INFO_STREAM("motor_drive main function");
     ros::spinOnce();
     rate.sleep();
   }

@@ -1,6 +1,8 @@
 
 <launch>
 
+  <rosparam command="load" file="$(find control)/params/motor_control.yaml" />
+
   <node pkg="control" type="motor_drive" name="motor_drive" clear_params="true" output="screen"/>
 
 </launch>
