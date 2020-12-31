@@ -1,7 +1,20 @@
-pitch_angle_ctrl_kp: 28000.0
+pitch_angle_ctrl_kp: -30000.0
 pitch_angle_ctrl_ki: 0.0
 pitch_angle_ctrl_kd: 0.0
 
 pitch_angle_err_integral_limit: 1.0
 pitch_angle_pid_saturation_limit: 2600.0
+
+distance_ctrl_kp: -0.0
+distance_ctrl_ki: 0.0
+distance_ctrl_kd: 0.0
+
+# Global parameters
+control_loop_time: 0.01 # [second]
+
+# Robot configuration parameters
+robot_mass: 2.678 # [kg]
+wheel_radius: 0.03 # [m]
+track_width: 0.196 # [m]
+CoM_height: 0.174 # [m]
 
